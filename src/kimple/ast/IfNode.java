@@ -3,7 +3,7 @@ package kimple.ast;
 public class IfNode extends StatementNode {
     private final ExpressionNode cond;
     private final BlockNode thenBlock;
-    private final BlockNode elseBlock; // may be null
+    private final BlockNode elseBlock;
 
     public IfNode(ExpressionNode cond, BlockNode thenBlock, BlockNode elseBlock, int line) {
         super(line);

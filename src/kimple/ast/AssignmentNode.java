@@ -1,5 +1,6 @@
 package kimple.ast;
 
+
 public class AssignmentNode extends StatementNode {
     private final String name;
     private final ExpressionNode expr;

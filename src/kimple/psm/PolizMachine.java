@@ -6,220 +6,273 @@ import kimple.poliz.PolizModule;
 import java.util.*;
 
 public class PolizMachine {
-    private final PolizModule module;
-    private final List<PolizInstruction> instrs;
+
+    private final Map<String, PolizModule> modules;
+    private PolizModule currentModule;
+    private List<PolizInstruction> instrs;
+
     private final Deque<Object> stack = new ArrayDeque<>();
-    private final Map<String,Object> globals = new HashMap<>();
-    private final Deque<Frame> callStack = new ArrayDeque<>();
+    private final Map<String, Object> globals = new HashMap<>();
     private final Scanner scanner = new Scanner(System.in);
 
-    public PolizMachine(PolizModule module) {
-        this.module = module;
-        this.instrs = module.resolveLabels();
-        Map<String, Integer> labels = module.labelMap;
-    }
+    private final Deque<Frame> callStack = new ArrayDeque<>();
 
     private static class Frame {
-        Map<String,Object> locals = new HashMap<>();
-        int retPc;
-        Frame(int retPc) { this.retPc = retPc; }
+        public final PolizModule module;
+        public final List<PolizInstruction> instrs;
+        public final Map<String, Object> locals = new HashMap<>();
+        public int pc;
+        public final int retValueAddr;
+
+        Frame(PolizModule module, List<PolizInstruction> instrs, int pc, int retValueAddr) {
+            this.module = module;
+            this.instrs = instrs;
+            this.pc = pc;
+            this.retValueAddr = retValueAddr;
+        }
+    }
+
+    public PolizMachine(Map<String, PolizModule> modules) {
+        this.modules = modules;
+        this.currentModule = modules.get("MAIN");
+
+        if (currentModule == null)
+            throw new RuntimeException("MAIN module not found");
+
+        this.instrs = currentModule.resolveLabels();
     }
 
     public void execute() {
-        module.resolveLabels();
+        executeModule(currentModule);
+    }
 
-        int pc = 0;
-        while (pc < instrs.size()) {
-            PolizInstruction ins = instrs.get(pc);
+    private void executeModule(PolizModule module) {
+
+        this.currentModule = module;
+        this.instrs = module.resolveLabels();
+
+        Frame frame = new Frame(module, instrs, 0, -1);
+        callStack.push(frame);
+
+        runLoop();
+    }
+
+    private void runLoop() {
+
+        while (!callStack.isEmpty()) {
+
+            Frame frame = callStack.peek();
+
+            if (frame.pc >= frame.instrs.size()) {
+                callStack.pop();
+                if (!callStack.isEmpty()) continue;
+                break;
+            }
+
+            PolizInstruction ins = frame.instrs.get(frame.pc);
             String op = ins.opcode;
             String arg = ins.operand;
+
             switch (op) {
-                case "PUSH":
+                case "PUSH" -> {
                     stack.push(parseLiteral(arg));
-                    pc++; break;
-                case "LOAD": {
-                    Object v = loadVar(arg);
-                    stack.push(v);
-                    pc++; break;
+                    frame.pc++;
                 }
-                case "STORE": {
-                    Object value = stack.pop();
-                    storeVar(arg, value);
-                    pc++; break;
+
+                case "LOAD" -> {
+                    stack.push(loadVar(arg));
+                    frame.pc++;
                 }
-                case "ALLOC_GLOBAL": {
-                    globals.put(arg, 0);
-                    pc++; break;
-                }
-                case "ALLOC_LOCAL": {
-                    if (!callStack.isEmpty()) callStack.peek().locals.put(arg, 0);
-                    else globals.put(arg, 0);
-                    pc++; break;
-                }
-                case "STORE_LOCAL": {
+
+                case "STORE" -> {
                     Object v = stack.pop();
-                    if (callStack.isEmpty()) globals.put(arg, v);
-                    else callStack.peek().locals.put(arg, v);
-                    pc++; break;
+                    storeVar(arg, v);
+                    frame.pc++;
                 }
-                case "STORE_GLOBAL": {
+
+                case "ALLOC_GLOBAL" -> {
+                    globals.put(arg, 0);
+                    frame.pc++;
+                }
+
+                case "ALLOC_LOCAL" -> {
+                    frame.locals.put(arg, 0);
+                    frame.pc++;
+                }
+
+                case "STORE_LOCAL" -> {
+                    Object v = stack.pop();
+                    frame.locals.put(arg, v);
+                    frame.pc++;
+                }
+
+                case "STORE_GLOBAL" -> {
                     Object v = stack.pop();
                     globals.put(arg, v);
-                    pc++; break;
+                    frame.pc++;
                 }
-                case "LOAD_LOCAL": {
-                    Object val = callStack.isEmpty() ? globals.get(arg) : callStack.peek().locals.get(arg);
-                    stack.push(val == null ? 0 : val);
-                    pc++; break;
-                }
-                case "STORE_GLOBAL_VAR": {
-                    Object v = stack.pop(); globals.put(arg, v); pc++; break;
-                }
-                case "PRINT": {
-                    Object v = stack.pop();
-                    System.out.print(v);
-                    pc++; break;
-                }
-                case "READ": {
+
+                case "READ" -> {
                     String line = scanner.nextLine();
                     stack.push(line);
-                    pc++; break;
+                    frame.pc++;
                 }
-                case "+":
-                case "-":
-                case "*":
-                case "/":
-                case "%": {
-                    Number b = asNumber(stack.pop());
+
+                case "PRINT" -> {
+                    System.out.print(stack.pop());
+                    frame.pc++;
+                }
+
+                case "+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=" -> {
+                    evalBinary(op);
+                    frame.pc++;
+                }
+
+                case "NOT" -> {
+                    boolean v = !isTruthy(stack.pop());
+                    stack.push(v ? 1 : 0);
+                    frame.pc++;
+                }
+
+                case "NEG" -> {
                     Number a = asNumber(stack.pop());
-                    Number res = switch (op) {
-                        case "+" ->
-                                (a instanceof Double || b instanceof Double) ? a.doubleValue() + b.doubleValue() : a.intValue() + b.intValue();
-                        case "-" ->
-                                (a instanceof Double || b instanceof Double) ? a.doubleValue() - b.doubleValue() : a.intValue() - b.intValue();
-                        case "*" ->
-                                (a instanceof Double || b instanceof Double) ? a.doubleValue() * b.doubleValue() : a.intValue() * b.intValue();
-                        case "/" -> a.doubleValue() / b.doubleValue();
-                        default -> a.intValue() % b.intValue();
-                    };
-                    stack.push(res); pc++; break;
+                    stack.push(a instanceof Double ? -a.doubleValue() : -a.intValue());
+                    frame.pc++;
                 }
-                case "==": case "!=": case "<": case "<=": case ">": case ">=": {
-                    Object rb = stack.pop();
-                    Object ra = stack.pop();
-                    boolean r = switch (op) {
-                        case "==" -> ra.equals(rb);
-                        case "!=" -> !ra.equals(rb);
-                        case "<" -> toDouble(ra) < toDouble(rb);
-                        case "<=" -> toDouble(ra) <= toDouble(rb);
-                        case ">" -> toDouble(ra) > toDouble(rb);
-                        default -> toDouble(ra) >= toDouble(rb);
-                    };
-                    stack.push(r ? 1 : 0);
-                    pc++; break;
+
+                case "JMP" -> {
+                    frame.pc = jumpTo(arg, frame.module);
                 }
-                case "NOT": {
-                    Object a = stack.pop();
-                    boolean val = !(isTruthy(a));
-                    stack.push(val ? 1 : 0);
-                    pc++; break;
-                }
-                case "NEG": {
-                    Number a = asNumber(stack.pop());
-                    if (a instanceof Double) stack.push(-a.doubleValue());
-                    else stack.push(-a.intValue());
-                    pc++; break;
-                }
-                case "JZ": {
+
+                case "JZ" -> {
                     Object cond = stack.pop();
-                    boolean isZero = !isTruthy(cond);
-                    if (isZero) {
-                        Integer target = module.labelMap.get(arg);
-                        if (target == null) throw new RuntimeException("Unknown label: " + arg);
-                        pc = target;
-                    } else pc++;
-                    break;
+                    if (!isTruthy(cond)) frame.pc = jumpTo(arg, frame.module);
+                    else frame.pc++;
                 }
-                case "JNZ": {
-                    Object cond = stack.pop();
-                    boolean isTrue = isTruthy(cond);
-                    if (isTrue) {
-                        Integer target = module.labelMap.get(arg);
-                        if (target == null) throw new RuntimeException("Unknown label: " + arg);
-                        pc = target;
-                    } else pc++;
-                    break;
+
+                case "JNZ" -> {
+                    Object cond2 = stack.pop();
+                    if (isTruthy(cond2)) frame.pc = jumpTo(arg, frame.module);
+                    else frame.pc++;
                 }
-                case "JMP": {
-                    Integer target = module.labelMap.get(arg);
-                    if (target == null) throw new RuntimeException("Unknown label: " + arg);
-                    pc = target; break;
+
+                case "CALL" -> {
+                    callFunction(arg, frame);
                 }
-                case "CALL": {
-                    Integer entry = module.labelMap.get("fun_" + arg);
-                    if (entry == null) throw new RuntimeException("Unknown function: " + arg);
-                    Frame frame = new Frame(pc + 1);
-                    callStack.push(frame);
-                    pc = entry;
-                    break;
+
+                case "RET" -> {
+                    returnFromFunction();
                 }
-                case "RET": {
-                    Frame fr = callStack.isEmpty() ? null : callStack.pop();
-                    if (fr == null) {
-                        return;
-                    } else {
-                        pc = fr.retPc;
-                    }
-                    break;
+
+                case "POP" -> {
+                    stack.pop();
+                    frame.pc++;
                 }
-                case "POP": { stack.pop(); pc++; break; }
-                default:
-                    pc++;
-                    break;
+
+                default -> frame.pc++;
             }
         }
     }
 
-    private static Number asNumber(Object o) {
-        if (o instanceof Number) return (Number)o;
-        try { return Integer.parseInt(o.toString()); } catch (Exception e) { return Double.parseDouble(o.toString()); }
+    private void callFunction(String fname, Frame caller) {
+        PolizModule fmod = modules.get("fun_" + fname);
+        if (fmod == null)
+            fmod = modules.get(fname);
+
+        if (fmod == null)
+            throw new RuntimeException("Function not found: " + fname);
+
+        List<PolizInstruction> code = fmod.resolveLabels();
+        int entry = fmod.labelMap.get("fun_" + fname);
+
+        Frame newFrame = new Frame(fmod, code, entry, caller.pc + 1);
+        callStack.push(newFrame);
     }
 
-    private static double toDouble(Object o) {
-        if (o instanceof Number) return ((Number)o).doubleValue();
-        try { return Double.parseDouble(o.toString()); } catch (Exception e) { return 0.0; }
+    private void returnFromFunction() {
+        Frame fr = callStack.pop();
+        if (callStack.isEmpty()) {
+            return;
+        }
+
+        Frame caller = callStack.peek();
+        caller.pc = fr.retValueAddr;
     }
 
-    private static boolean isTruthy(Object o) {
-        if (o == null) return false;
-        if (o instanceof Boolean) return (Boolean)o;
-        if (o instanceof Number) return ((Number)o).doubleValue() != 0.0;
-        if (o instanceof String) return !((String)o).isEmpty();
-        return true;
+    private int jumpTo(String label, PolizModule mod) {
+        Integer pc = mod.labelMap.get(label);
+        if (pc == null)
+            throw new RuntimeException("Unknown label: " + label);
+        return pc;
     }
 
     private Object loadVar(String name) {
-        if (!callStack.isEmpty() && callStack.peek().locals.containsKey(name)) {
-            return callStack.peek().locals.get(name);
+        if (!callStack.isEmpty()) {
+            Frame fr = callStack.peek();
+            if (fr.locals.containsKey(name)) return fr.locals.get(name);
         }
         return globals.getOrDefault(name, 0);
     }
 
     private void storeVar(String name, Object value) {
-        if (!callStack.isEmpty() && callStack.peek().locals.containsKey(name)) {
-            callStack.peek().locals.put(name, value);
-        } else {
-            globals.put(name, value);
+        if (!callStack.isEmpty()) {
+            Frame fr = callStack.peek();
+            if (fr.locals.containsKey(name)) {
+                fr.locals.put(name, value);
+                return;
+            }
         }
+        globals.put(name, value);
+    }
+
+    private void evalBinary(String op) {
+        Object rb = stack.pop();
+        Object ra = stack.pop();
+
+        switch (op) {
+            case "+" -> stack.push(asNumber(ra).doubleValue() + asNumber(rb).doubleValue());
+            case "-" -> stack.push(asNumber(ra).doubleValue() - asNumber(rb).doubleValue());
+            case "*" -> stack.push(asNumber(ra).doubleValue() * asNumber(rb).doubleValue());
+            case "/" -> stack.push(asNumber(ra).doubleValue() / asNumber(rb).doubleValue());
+            case "%" -> stack.push(asNumber(ra).intValue() % asNumber(rb).intValue());
+            case "==" -> stack.push(ra.equals(rb) ? 1 : 0);
+            case "!=" -> stack.push(!ra.equals(rb) ? 1 : 0);
+            case "<" -> stack.push(toDouble(ra) < toDouble(rb) ? 1 : 0);
+            case "<=" -> stack.push(toDouble(ra) <= toDouble(rb) ? 1 : 0);
+            case ">" -> stack.push(toDouble(ra) > toDouble(rb) ? 1 : 0);
+            case ">=" -> stack.push(toDouble(ra) >= toDouble(rb) ? 1 : 0);
+        }
+    }
+
+    private static Number asNumber(Object o) {
+        if (o instanceof Number) return (Number) o;
+        try { return Integer.parseInt(o.toString()); }
+        catch (Exception e) { return Double.parseDouble(o.toString()); }
+    }
+
+    private static double toDouble(Object o) {
+        if (o instanceof Number) return ((Number) o).doubleValue();
+        return Double.parseDouble(o.toString());
+    }
+
+    private static boolean isTruthy(Object o) {
+        if (o == null) return false;
+        if (o instanceof Boolean) return (Boolean) o;
+        if (o instanceof Number) return ((Number) o).doubleValue() != 0.0;
+        if (o instanceof String) return !((String) o).isEmpty();
+        return true;
     }
 
     private Object parseLiteral(String lit) {
         if (lit == null) return 0;
-        if (lit.startsWith("\"") && lit.endsWith("\"") && lit.length() >= 2) return lit.substring(1, lit.length()-1);
-        if ("true".equalsIgnoreCase(lit) || "false".equalsIgnoreCase(lit)) return Boolean.parseBoolean(lit);
-        if (lit.contains(".")) {
-            try { return Double.parseDouble(lit); } catch (Exception e) { return lit; }
-        }
-        try { return Integer.parseInt(lit); } catch (Exception e) { return lit; }
+
+        if (lit.startsWith("\"") && lit.endsWith("\""))
+            return lit.substring(1, lit.length() - 1);
+
+        if ("true".equals(lit)) return 1;
+        if ("false".equals(lit)) return 0;
+
+        if (lit.contains(".")) return Double.parseDouble(lit);
+        return Integer.parseInt(lit);
     }
 }

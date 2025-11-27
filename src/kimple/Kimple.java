@@ -8,12 +8,11 @@ import kimple.parser.SemanticException;
 import kimple.parser.SyntaxException;
 import kimple.poliz.KimplePolizGenerator;
 import kimple.poliz.PolizModule;
+import kimple.poliz.PolizWriter;
 import kimple.psm.PolizMachine;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 public class Kimple {
     public static void main(String[] args) {
@@ -64,7 +63,7 @@ public class Kimple {
         List<Token> tokens;
 
         System.out.println("==== Лексичний аналіз ====");
-        KimpleLexer lexer = new KimpleLexer(code);
+        KimpleLexer lexer = new KimpleLexer(code1);
         try {
             tokens = lexer.tokenize();
             for (Token token : tokens) {
@@ -100,22 +99,13 @@ public class Kimple {
         }
 
         KimplePolizGenerator gen = new KimplePolizGenerator();
-        PolizModule module = gen.generate(program);
-        module.resolveLabels();
+        Map<String, PolizModule> modules = gen.generateAll(program);
 
-        StringBuilder sb = new StringBuilder();
-        for (var ins : module.code)
-            sb.append(ins.toString()).append("\n");
+        PolizWriter.writeFiles(modules, "program");
 
-        try {
-            Files.writeString(Path.of("poliz.txt"), sb.toString());
-        } catch (IOException e) {
-            System.err.println("Не вдалося записати файл POLIZ: " + e.getMessage());
-        }
-
-        System.out.println("Виконання POLIZ...");
+        System.out.println("\nВиконання POLIZ...");
         System.out.println("======================================\n");
-        PolizMachine vm = new PolizMachine(module);
+        PolizMachine vm = new PolizMachine(modules);
         vm.execute();
         System.out.println("\n\n======================================");
         System.out.println("Виконання завершено.");

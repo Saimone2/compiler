@@ -2,8 +2,8 @@ package kimple.ast;
 
 public class VarDeclNode extends StatementNode {
     private final String name;
-    private final String type; // "Int","Double","Boolean","String"
-    private final ExpressionNode init; // may be null
+    private final String type;
+    private final ExpressionNode init;
     private final boolean isConst;
 
     public VarDeclNode(String name, String type, ExpressionNode init, boolean isConst, int line) {

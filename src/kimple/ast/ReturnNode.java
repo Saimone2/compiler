@@ -1,7 +1,7 @@
 package kimple.ast;
 
 public class ReturnNode extends StatementNode {
-    private final ExpressionNode expr; // may be null
+    private final ExpressionNode expr;
 
     public ReturnNode(ExpressionNode expr, int line) { super(line); this.expr = expr; }
     public ExpressionNode getExpr() { return expr; }

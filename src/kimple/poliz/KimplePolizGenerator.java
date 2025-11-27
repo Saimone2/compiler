@@ -1,229 +1,228 @@
 package kimple.poliz;
 
 import kimple.ast.*;
+import java.util.*;
+
 
 public class KimplePolizGenerator {
 
-    private PolizModule module;
+    private final Map<String, PolizModule> funcModules = new LinkedHashMap<>();
+    private PolizModule currentModule;
+    private final Deque<String> funcStack = new ArrayDeque<>();
     private int lblCounter = 0;
 
-    public PolizModule generate(ProgramNode program) {
-        module = new PolizModule();
+    public Map<String, PolizModule> generateAll(ProgramNode program) {
+        funcModules.clear();
         lblCounter = 0;
 
-        // top-level: vars, consts, function decls and statements
+        currentModule = new PolizModule();
+
         for (ASTNode top : program.getTopLevel()) {
-            if (top instanceof VarDeclNode) {
-                genVarDecl((VarDeclNode) top, true); // treat top-level as global
-            } else if (top instanceof FuncDeclNode) {
-                genFunction((FuncDeclNode) top);
-            } else if (top instanceof StatementNode) {
-                genStatement((StatementNode) top);
+            if (top instanceof FuncDeclNode f) {
+                genFunction(f);
+            } else if (top instanceof VarDeclNode v) {
+                genVarDecl(v, true);
             } else {
-                throw new RuntimeException("Unknown top-level node: " + top);
+                genStatement((StatementNode) top);
             }
         }
 
-        return module;
+        funcModules.put("MAIN", currentModule);
+        return funcModules;
     }
 
     private String newLabel() { return "L" + (lblCounter++); }
 
-    /* -------------------- Declarations / Functions -------------------- */
+    private String buildFuncName(String name) {
+        if (funcStack.isEmpty()) return name;
+        return String.join("$", funcStack) + "$" + name;
+    }
 
+    /* ==================== FUNCTIONS ==================== */
+    private void genFunction(FuncDeclNode f) {
+        String fullName = buildFuncName(f.getName());
+
+        PolizModule old = currentModule;
+        currentModule = new PolizModule();
+
+        funcStack.push(f.getName());
+
+        currentModule.emit("LABEL", "fun_" + fullName);
+        currentModule.emit("ENTER", Integer.toString(f.getParamNames().size()));
+
+        genBlock(f.getBody());
+
+        currentModule.emit("PUSH", "0");
+        currentModule.emit("RET");
+
+        funcModules.put(fullName, currentModule);
+        for (FuncDeclNode nested : f.getNested()) {
+            genFunction(nested);
+        }
+
+        funcStack.pop();
+        currentModule = old;
+    }
+
+    /* ==================== DECLARATIONS ==================== */
     private void genVarDecl(VarDeclNode node, boolean isGlobal) {
-        if (isGlobal) {
-            // allocate global (implicit)
-            module.emit("ALLOC_GLOBAL", node.getName());
-            if (node.getInit() != null) {
-                genExpression(node.getInit());
-                module.emit("STORE_GLOBAL", node.getName());
-            }
-        } else {
-            // local in function/block
-            module.emit("ALLOC_LOCAL", node.getName());
-            if (node.getInit() != null) {
-                genExpression(node.getInit());
-                module.emit("STORE_LOCAL", node.getName());
-            }
+        if (isGlobal)
+            currentModule.emit("ALLOC_GLOBAL", node.getName());
+        else
+            currentModule.emit("ALLOC_LOCAL", node.getName());
+
+        if (node.getInit() != null) {
+            genExpression(node.getInit());
+            currentModule.emit(
+                    isGlobal ? "STORE_GLOBAL" : "STORE_LOCAL",
+                    node.getName()
+            );
         }
     }
 
-    private void genFunction(FuncDeclNode f) {
-        // function label
-        module.emit("LABEL", "fun_" + f.getName());
-        // enter frame (create locals area)
-        module.emit("ENTER", Integer.toString(f.getParamNames().size()));
-        // declare params as locals implicitly — we assume caller pushes args, ENTER will create frame and assign
-        // generate body
-        genBlock(f.getBody());
-        // ensure return
-        module.emit("PUSH", "0"); // default return 0/Unit
-        module.emit("RET");
-        module.emit("END_FUNC", f.getName());
-    }
-
-    /* -------------------- Statements -------------------- */
-
+    /* ==================== STATEMENTS ==================== */
     private void genStatement(StatementNode s) {
-        if (s instanceof VarDeclNode) genVarDecl((VarDeclNode) s, false);
-        else if (s instanceof AssignmentNode) genAssignment((AssignmentNode) s);
-        else if (s instanceof InputNode) genInput((InputNode) s);
-        else if (s instanceof OutputNode) genOutput((OutputNode) s);
-        else if (s instanceof ReturnNode) genReturn((ReturnNode) s);
-        else if (s instanceof IfNode) genIf((IfNode) s);
-        else if (s instanceof WhileNode) genWhile((WhileNode) s);
-        else if (s instanceof ForNode) genFor((ForNode) s);
-        else if (s instanceof FuncCallStmtNode) { genFuncCall(((FuncCallStmtNode) s).getCall()); module.emit("POP"); }
-        else if (s instanceof BlockNode) genBlock((BlockNode) s);
-        else throw new RuntimeException("Unsupported statement: " + s);
+        if (s instanceof VarDeclNode v) genVarDecl(v, false);
+        else if (s instanceof AssignmentNode a) genAssignment(a);
+        else if (s instanceof InputNode i) genInput(i);
+        else if (s instanceof OutputNode o) genOutput(o);
+        else if (s instanceof ReturnNode r) genReturn(r);
+        else if (s instanceof IfNode i) genIf(i);
+        else if (s instanceof WhileNode w) genWhile(w);
+        else if (s instanceof ForNode f) genFor(f);
+        else if (s instanceof FuncCallStmtNode call) {
+            genFuncCall(call.getCall());
+            currentModule.emit("POP");
+        }
+        else if (s instanceof BlockNode b) genBlock(b);
+        else if (s instanceof FuncDeclNode fd) {
+            genFunction(fd);
+        }
+        else throw new RuntimeException("Unsupported stmt: " + s);
     }
 
     private void genAssignment(AssignmentNode n) {
         genExpression(n.getExpr());
-        module.emit("STORE", n.getName());
+        currentModule.emit("STORE", n.getName());
     }
 
     private void genInput(InputNode in) {
-        module.emit("READ");
-        module.emit("STORE", in.getTargetName());
+        currentModule.emit("READ");
+        currentModule.emit("STORE", in.getTargetName());
     }
 
     private void genOutput(OutputNode out) {
         for (ExpressionNode arg : out.getArgs()) {
             genExpression(arg);
-            module.emit("PRINT");
+            currentModule.emit("PRINT");
         }
     }
 
     private void genReturn(ReturnNode r) {
         if (r.getExpr() != null) genExpression(r.getExpr());
-        else module.emit("PUSH", "0");
-        module.emit("RET");
+        else currentModule.emit("PUSH", "0");
+
+        currentModule.emit("RET");
     }
 
     private void genBlock(BlockNode b) {
-        for (StatementNode s : b.getStatements()) genStatement(s);
+        for (StatementNode s : b.getStatements())
+            genStatement(s);
     }
 
-    /* -------------------- Control flow -------------------- */
-
+    /* ==================== CONTROL FLOW ==================== */
     private void genIf(IfNode node) {
         genExpression(node.getCond());
         String elseLbl = newLabel();
         String endLbl = newLabel();
-        module.emit("JZ", elseLbl);
+
+        currentModule.emit("JZ", elseLbl);
         genBlock(node.getThenBlock());
-        module.emit("JMP", endLbl);
-        module.emit("LABEL", elseLbl);
-        if (node.getElseBlock() != null) genBlock(node.getElseBlock());
-        module.emit("LABEL", endLbl);
+        currentModule.emit("JMP", endLbl);
+        currentModule.emit("LABEL", elseLbl);
+
+        if (node.getElseBlock() != null)
+            genBlock(node.getElseBlock());
+
+        currentModule.emit("LABEL", endLbl);
     }
 
     private void genWhile(WhileNode node) {
         String start = newLabel();
         String end = newLabel();
-        module.emit("LABEL", start);
+
+        currentModule.emit("LABEL", start);
         genExpression(node.getCond());
-        module.emit("JZ", end);
+        currentModule.emit("JZ", end);
+
         genBlock(node.getBody());
-        module.emit("JMP", start);
-        module.emit("LABEL", end);
+
+        currentModule.emit("JMP", start);
+        currentModule.emit("LABEL", end);
     }
 
     private void genFor(ForNode f) {
-        // i := start
         genExpression(f.getStartExpr());
-        module.emit("STORE", f.getVarName());
-        String start = newLabel();
+        currentModule.emit("STORE", f.getVarName());
+
+        String loop = newLabel();
         String end = newLabel();
-        module.emit("LABEL", start);
-        module.emit("LOAD", f.getVarName());
+
+        currentModule.emit("LABEL", loop);
+
+        currentModule.emit("LOAD", f.getVarName());
         genExpression(f.getEndExpr());
-        module.emit("<=");
-        module.emit("JZ", end);
+        currentModule.emit("<=");
+        currentModule.emit("JZ", end);
+
         genBlock(f.getBody());
-        // i = i + 1
-        module.emit("LOAD", f.getVarName());
-        module.emit("PUSH", "1");
-        module.emit("+");
-        module.emit("STORE", f.getVarName());
-        module.emit("JMP", start);
-        module.emit("LABEL", end);
+
+        currentModule.emit("LOAD", f.getVarName());
+        currentModule.emit("PUSH", "1");
+        currentModule.emit("+");
+        currentModule.emit("STORE", f.getVarName());
+
+        currentModule.emit("JMP", loop);
+        currentModule.emit("LABEL", end);
     }
 
-    /* -------------------- Expressions -------------------- */
-
+    /* ==================== EXPRESSIONS ==================== */
     private void genExpression(ExpressionNode e) {
         if (e instanceof LiteralNode l) {
-            module.emit("PUSH", l.getValue());
-        } else if (e instanceof IdentNode id) {
-            module.emit("LOAD", id.getName());
-        } else if (e instanceof BinaryOpNode b) {
-            // short-circuit for && and ||
-            String op = b.getOp();
-            if ("&&".equals(op)) {
-                String falseLbl = newLabel();
-                String end = newLabel();
-                genExpression(b.getLeft());
-                module.emit("JZ", falseLbl);
-                genExpression(b.getRight());
-                module.emit("JZ", falseLbl);
-                module.emit("PUSH", "1");
-                module.emit("JMP", end);
-                module.emit("LABEL", falseLbl);
-                module.emit("PUSH", "0");
-                module.emit("LABEL", end);
-                return;
-            } else if ("||".equals(op)) {
-                String trueLbl = newLabel();
-                String end = newLabel();
-                genExpression(b.getLeft());
-                module.emit("JNZ", trueLbl);
-                genExpression(b.getRight());
-                module.emit("JNZ", trueLbl);
-                module.emit("PUSH", "0");
-                module.emit("JMP", end);
-                module.emit("LABEL", trueLbl);
-                module.emit("PUSH", "1");
-                module.emit("LABEL", end);
-                return;
-            }
-            genExpression(b.getLeft());
-            genExpression(b.getRight());
-            // arithmetic or comparison or other
-            switch (op) {
-                case "+": module.emit("+"); break;
-                case "-": module.emit("-"); break;
-                case "*": module.emit("*"); break;
-                case "/": module.emit("/"); break;
-                case "%": module.emit("%"); break;
-                case "==": module.emit("=="); break;
-                case "!=": module.emit("!="); break;
-                case "<": module.emit("<"); break;
-                case "<=": module.emit("<="); break;
-                case ">": module.emit(">"); break;
-                case ">=": module.emit(">="); break;
-                default: module.emit(op); break;
-            }
-        } else if (e instanceof UnaryOpNode u) {
+            currentModule.emit("PUSH", l.getValue());
+        }
+        else if (e instanceof IdentNode id) {
+            currentModule.emit("LOAD", id.getName());
+        }
+        else if (e instanceof BinaryOpNode b) {
+            genBinary(b);
+        }
+        else if (e instanceof UnaryOpNode u) {
             genExpression(u.getExpr());
-            String op = u.getOp();
-            if ("!".equals(op)) module.emit("NOT");
-            else if ("-".equals(op)) module.emit("NEG");
-            else module.emit("UNARY_" + op);
-        } else if (e instanceof FuncCallExprNode) {
-            genFuncCall((FuncCallExprNode) e);
-        } else if (e instanceof CastNode c) {
-            module.emit("LOAD", c.getTarget().getName());
-            module.emit("CAST", c.getToType());
-        } else {
-            throw new RuntimeException("Unhandled expression node: " + e.getClass());
+            if (u.getOp().equals("!")) currentModule.emit("NOT");
+            else if (u.getOp().equals("-")) currentModule.emit("NEG");
+        }
+        else if (e instanceof FuncCallExprNode c) {
+            genFuncCall(c);
+        }
+        else if (e instanceof CastNode c) {
+            genExpression(c.getTarget());
+            currentModule.emit("CAST", c.getToType());
+        }
+        else {
+            throw new RuntimeException("Unknown expr: " + e);
         }
     }
 
+    private void genBinary(BinaryOpNode b) {
+        genExpression(b.getLeft());
+        genExpression(b.getRight());
+        currentModule.emit(b.getOp());
+    }
+
     private void genFuncCall(FuncCallExprNode c) {
-        for (ExpressionNode a : c.getArgs()) genExpression(a);
-        module.emit("CALL", c.getName());
+        for (ExpressionNode a : c.getArgs())
+            genExpression(a);
+        currentModule.emit("CALL", c.getName());
     }
 }

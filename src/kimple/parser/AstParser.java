@@ -3,12 +3,16 @@ package kimple.parser;
 import kimple.lexer.Token;
 import kimple.lexer.TokenType;
 import kimple.ast.*;
+
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 
 public class AstParser {
     private final List<Token> tokens;
     private int pos = 0;
+    private final Deque<FuncDeclNode> funcStack = new ArrayDeque<>();
 
     public AstParser(List<Token> tokens) {
         this.tokens = tokens;
@@ -119,46 +123,32 @@ public class AstParser {
             returnType = rt.value();
         }
 
+        FuncDeclNode fn = new FuncDeclNode(funcName, paramNames, paramTypes, returnType, null, nameTok.line());
+        if (!funcStack.isEmpty()) {
+            funcStack.peek().addNested(fn);
+        }
+
+        funcStack.push(fn);
         BlockNode body = parseBlock();
-        return new FuncDeclNode(funcName, paramNames, paramTypes, returnType, body, nameTok.line());
+        fn.setBody(body);
+        funcStack.pop();
+
+        return fn;
     }
 
     private StatementNode parseStatement() {
         Token t = current();
         if (t.type() == TokenType.KEYWORD) {
             return switch (t.value()) {
-                case "val" -> {
-                    advance();
-                    yield parseVarDecl(true);
-                }
-                case "var" -> {
-                    advance();
-                    yield parseVarDecl(false);
-                }
-                case "read" -> {
-                    advance();
-                    yield parseInputStmt();
-                }
-                case "print" -> {
-                    advance();
-                    yield parseOutputStmt();
-                }
-                case "return" -> {
-                    advance();
-                    yield parseReturnStmt();
-                }
-                case "if" -> {
-                    advance();
-                    yield parseIfStmt();
-                }
-                case "for" -> {
-                    advance();
-                    yield parseForStmt();
-                }
-                case "while" -> {
-                    advance();
-                    yield parseWhileStmt();
-                }
+                case "val" -> { advance(); yield parseVarDecl(true); }
+                case "var" -> { advance(); yield parseVarDecl(false); }
+                case "fun" -> { advance(); yield parseFunctionDecl(); }
+                case "read" -> { advance(); yield parseInputStmt(); }
+                case "print" -> { advance(); yield parseOutputStmt(); }
+                case "return" -> { advance(); yield parseReturnStmt(); }
+                case "if" -> { advance(); yield parseIfStmt(); }
+                case "for" -> { advance(); yield parseForStmt(); }
+                case "while" -> { advance(); yield parseWhileStmt(); }
                 default -> throw new SyntaxException("Unexpected keyword " + t.value() + " at line " + t.line());
             };
         } else if (t.type() == TokenType.IDENT) {
