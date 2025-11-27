@@ -3,7 +3,6 @@ package kimple.parser;
 import kimple.lexer.Token;
 import kimple.lexer.TokenType;
 import kimple.ast.*;
-import kimple.visitor.ASTVisitor;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -51,9 +50,6 @@ public class AstParser {
         return false;
     }
 
-    /**
-     * Entry point: парсить повну програму та повертати ProgramNode.
-     */
     public ProgramNode parse() {
         ProgramNode program = new ProgramNode();
         while (current().type() != TokenType.EOF) {
@@ -65,7 +61,6 @@ public class AstParser {
     }
 
     private ASTNode parseTopLevel() {
-        // Could be functionDecl | var/const decl | statement
         if (matchKeyword("fun")) {
             return parseFunctionDecl();
         } else if (matchKeyword("val")) {
@@ -73,9 +68,7 @@ public class AstParser {
         } else if (matchKeyword("var")) {
             return parseGlobalVarDecl();
         } else {
-            // statement as top-level (e.g., function call / assignment)
-            StatementNode s = parseStatement();
-            return s;
+            return parseStatement();
         }
     }
 
@@ -133,36 +126,42 @@ public class AstParser {
     private StatementNode parseStatement() {
         Token t = current();
         if (t.type() == TokenType.KEYWORD) {
-            switch (t.value()) {
-                case "val":
+            return switch (t.value()) {
+                case "val" -> {
                     advance();
-                    return parseVarDecl(true);
-                case "var":
+                    yield parseVarDecl(true);
+                }
+                case "var" -> {
                     advance();
-                    return parseVarDecl(false);
-                case "read":
+                    yield parseVarDecl(false);
+                }
+                case "read" -> {
                     advance();
-                    return parseInputStmt();
-                case "print":
+                    yield parseInputStmt();
+                }
+                case "print" -> {
                     advance();
-                    return parseOutputStmt();
-                case "return":
+                    yield parseOutputStmt();
+                }
+                case "return" -> {
                     advance();
-                    return parseReturnStmt();
-                case "if":
+                    yield parseReturnStmt();
+                }
+                case "if" -> {
                     advance();
-                    return parseIfStmt();
-                case "for":
+                    yield parseIfStmt();
+                }
+                case "for" -> {
                     advance();
-                    return parseForStmt();
-                case "while":
+                    yield parseForStmt();
+                }
+                case "while" -> {
                     advance();
-                    return parseWhileStmt();
-                default:
-                    throw new SyntaxException("Unexpected keyword " + t.value() + " at line " + t.line());
-            }
+                    yield parseWhileStmt();
+                }
+                default -> throw new SyntaxException("Unexpected keyword " + t.value() + " at line " + t.line());
+            };
         } else if (t.type() == TokenType.IDENT) {
-            // either assignment or func call statement
             if (peek().type() == TokenType.ASSIGN_OP) {
                 return parseAssignment();
             } else {
@@ -252,7 +251,6 @@ public class AstParser {
         Token varTok = expect(TokenType.IDENT);
         expect(TokenType.COLON);
         Token varType = expect(TokenType.TYPE);
-        // expect 'in' keyword
         Token inTok = current();
         if (inTok.type() != TokenType.KEYWORD || !"in".equals(inTok.value())) {
             throw new SyntaxException("Expected 'in' keyword in for-loop at line " + inTok.line());
@@ -300,10 +298,6 @@ public class AstParser {
         return new FuncCallExprNode(funcName, args, name.line());
     }
 
-    /* -------------------------
-       Expressions (precedence climbing via recursive methods)
-       ------------------------- */
-
     private ExpressionNode parseExpression() {
         return parseLogicOr();
     }
@@ -343,7 +337,6 @@ public class AstParser {
         ExpressionNode left = parseAddition();
         while (current().type() == TokenType.REL_OP) {
             Token op = current(); advance();
-            // REL_OP token holds the textual operator in token.value(), e.g. "<", "<=", ">"
             String opname = op.value();
             ExpressionNode right = parseAddition();
             left = new BinaryOpNode(opname, left, right, op.line());
@@ -391,17 +384,13 @@ public class AstParser {
             return new UnaryOpNode("!", e, t.line());
         }
         if (t.type() == TokenType.ADD_OP) {
-            // unary plus
             advance();
             return parseUnary();
         }
-        if (t.type() == TokenType.MULT_OP || (t.type() == TokenType.ADD_OP && "-".equals(t.value()))) {
-            // Some lexers may have separate SUB_OP; handle generic '-' as well
-            if (t.type() == TokenType.MULT_OP || "-".equals(t.value())) {
-                advance();
-                ExpressionNode e = parseUnary();
-                return new UnaryOpNode("-", e, t.line());
-            }
+        if (t.type() == TokenType.MULT_OP) {
+            advance();
+            ExpressionNode e = parseUnary();
+            return new UnaryOpNode("-", e, t.line());
         }
         return parsePrimary();
     }
@@ -430,17 +419,14 @@ public class AstParser {
                 return new LiteralNode(curr.value(), "Boolean", curr.line());
             }
             case IDENT -> {
-                // IDENT can be function call, IDENT as cast, or ident usage
                 Token idTok = curr;
                 advance();
                 if (current().type() == TokenType.LPAREN) {
-                    // function call
-                    pos--; // step back to allow parseFuncCallExpr to expect IDENT
+                    pos--;
                     return parseFuncCallExpr();
                 }
-                // check cast: only support IDENT as cast (IDENT 'as' TYPE)
                 if (current().type() == TokenType.CAST_OP) {
-                    advance(); // consume 'as'
+                    advance();
                     Token typeTok = expect(TokenType.TYPE);
                     IdentNode id = new IdentNode(idTok.value(), idTok.line());
                     return new CastNode(id, typeTok.value(), idTok.line());
@@ -457,7 +443,6 @@ public class AstParser {
         }
     }
 
-    // small helper exception class if not already in project
     public static class SyntaxException extends RuntimeException {
         public SyntaxException(String msg) { super(msg); }
     }

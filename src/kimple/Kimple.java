@@ -64,7 +64,7 @@ public class Kimple {
         List<Token> tokens;
 
         System.out.println("==== Лексичний аналіз ====");
-        KimpleLexer lexer = new KimpleLexer(code1);
+        KimpleLexer lexer = new KimpleLexer(code);
         try {
             tokens = lexer.tokenize();
             for (Token token : tokens) {

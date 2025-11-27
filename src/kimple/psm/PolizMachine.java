@@ -7,8 +7,7 @@ import java.util.*;
 
 public class PolizMachine {
     private final PolizModule module;
-    private List<PolizInstruction> instrs; // resolved instructions (labels removed)
-    private final Map<String,Integer> labels; // name -> index in instrs
+    private final List<PolizInstruction> instrs;
     private final Deque<Object> stack = new ArrayDeque<>();
     private final Map<String,Object> globals = new HashMap<>();
     private final Deque<Frame> callStack = new ArrayDeque<>();
@@ -16,11 +15,8 @@ public class PolizMachine {
 
     public PolizMachine(PolizModule module) {
         this.module = module;
-        // resolve labels
         this.instrs = module.resolveLabels();
-        this.labels = module.labelMap; // filled by resolveLabels() call earlier - ensure module.labelMap set
-        // BUT resolveLabels() in PolizModule currently returns list but also populates labelMap in first pass,
-        // ensure we call module.resolveLabels() BEFORE using 'labels' map.
+        Map<String, Integer> labels = module.labelMap;
     }
 
     private static class Frame {
@@ -30,19 +26,13 @@ public class PolizMachine {
     }
 
     public void execute() {
-        // populate label map properly (module.resolveLabels must have been called)
-        // If labelMap is empty, call resolveLabels()
-        module.resolveLabels(); // ensures labelMap populated
-        // but need mapping of label names to concrete pc indices in instrs
-        // translate label names in module.labelMap (they are indices in final stream where LABELs excluded)
-        // We'll use module.labelMap directly
+        module.resolveLabels();
 
         int pc = 0;
         while (pc < instrs.size()) {
             PolizInstruction ins = instrs.get(pc);
             String op = ins.opcode;
             String arg = ins.operand;
-            // arithmetic
             switch (op) {
                 case "PUSH":
                     stack.push(parseLiteral(arg));
@@ -62,7 +52,6 @@ public class PolizMachine {
                     pc++; break;
                 }
                 case "ALLOC_LOCAL": {
-                    // create in current frame if exists, else globals
                     if (!callStack.isEmpty()) callStack.peek().locals.put(arg, 0);
                     else globals.put(arg, 0);
                     pc++; break;
@@ -83,7 +72,7 @@ public class PolizMachine {
                     stack.push(val == null ? 0 : val);
                     pc++; break;
                 }
-                case "STORE_GLOBAL_VAR": { // not used typically
+                case "STORE_GLOBAL_VAR": {
                     Object v = stack.pop(); globals.put(arg, v); pc++; break;
                 }
                 case "PRINT": {
@@ -103,28 +92,29 @@ public class PolizMachine {
                 case "%": {
                     Number b = asNumber(stack.pop());
                     Number a = asNumber(stack.pop());
-                    Number res;
-                    switch (op) {
-                        case "+": res = (a instanceof Double || b instanceof Double) ? a.doubleValue() + b.doubleValue() : a.intValue() + b.intValue(); break;
-                        case "-": res = (a instanceof Double || b instanceof Double) ? a.doubleValue() - b.doubleValue() : a.intValue() - b.intValue(); break;
-                        case "*": res = (a instanceof Double || b instanceof Double) ? a.doubleValue() * b.doubleValue() : a.intValue() * b.intValue(); break;
-                        case "/": res = a.doubleValue() / b.doubleValue(); break;
-                        default: res = a.intValue() % b.intValue(); break;
-                    }
+                    Number res = switch (op) {
+                        case "+" ->
+                                (a instanceof Double || b instanceof Double) ? a.doubleValue() + b.doubleValue() : a.intValue() + b.intValue();
+                        case "-" ->
+                                (a instanceof Double || b instanceof Double) ? a.doubleValue() - b.doubleValue() : a.intValue() - b.intValue();
+                        case "*" ->
+                                (a instanceof Double || b instanceof Double) ? a.doubleValue() * b.doubleValue() : a.intValue() * b.intValue();
+                        case "/" -> a.doubleValue() / b.doubleValue();
+                        default -> a.intValue() % b.intValue();
+                    };
                     stack.push(res); pc++; break;
                 }
                 case "==": case "!=": case "<": case "<=": case ">": case ">=": {
                     Object rb = stack.pop();
                     Object ra = stack.pop();
-                    boolean r;
-                    switch (op) {
-                        case "==": r = ra.equals(rb); break;
-                        case "!=": r = !ra.equals(rb); break;
-                        case "<": r = toDouble(ra) < toDouble(rb); break;
-                        case "<=": r = toDouble(ra) <= toDouble(rb); break;
-                        case ">": r = toDouble(ra) > toDouble(rb); break;
-                        default: r = toDouble(ra) >= toDouble(rb); break;
-                    }
+                    boolean r = switch (op) {
+                        case "==" -> ra.equals(rb);
+                        case "!=" -> !ra.equals(rb);
+                        case "<" -> toDouble(ra) < toDouble(rb);
+                        case "<=" -> toDouble(ra) <= toDouble(rb);
+                        case ">" -> toDouble(ra) > toDouble(rb);
+                        default -> toDouble(ra) >= toDouble(rb);
+                    };
                     stack.push(r ? 1 : 0);
                     pc++; break;
                 }
@@ -166,20 +156,16 @@ public class PolizMachine {
                     pc = target; break;
                 }
                 case "CALL": {
-                    // push return address (pc+1) in frame and jump to function label
                     Integer entry = module.labelMap.get("fun_" + arg);
                     if (entry == null) throw new RuntimeException("Unknown function: " + arg);
-                    // create frame with retPc
                     Frame frame = new Frame(pc + 1);
                     callStack.push(frame);
                     pc = entry;
                     break;
                 }
                 case "RET": {
-                    // function should push return value on stack before RET
                     Frame fr = callStack.isEmpty() ? null : callStack.pop();
                     if (fr == null) {
-                        // top-level RET -> finish
                         return;
                     } else {
                         pc = fr.retPc;
@@ -188,7 +174,6 @@ public class PolizMachine {
                 }
                 case "POP": { stack.pop(); pc++; break; }
                 default:
-                    // handle PUSH of literal already, LABEL removed; unknown opcode -> skip
                     pc++;
                     break;
             }
@@ -230,7 +215,6 @@ public class PolizMachine {
 
     private Object parseLiteral(String lit) {
         if (lit == null) return 0;
-        // strip quotes for string literals
         if (lit.startsWith("\"") && lit.endsWith("\"") && lit.length() >= 2) return lit.substring(1, lit.length()-1);
         if ("true".equalsIgnoreCase(lit) || "false".equalsIgnoreCase(lit)) return Boolean.parseBoolean(lit);
         if (lit.contains(".")) {

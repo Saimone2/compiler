@@ -2,9 +2,6 @@ package kimple.poliz;
 
 import kimple.ast.*;
 
-import java.util.ArrayList;
-import java.util.List;
-
 public class KimplePolizGenerator {
 
     private PolizModule module;
@@ -158,14 +155,11 @@ public class KimplePolizGenerator {
     /* -------------------- Expressions -------------------- */
 
     private void genExpression(ExpressionNode e) {
-        if (e instanceof LiteralNode) {
-            LiteralNode l = (LiteralNode) e;
+        if (e instanceof LiteralNode l) {
             module.emit("PUSH", l.getValue());
-        } else if (e instanceof IdentNode) {
-            IdentNode id = (IdentNode) e;
+        } else if (e instanceof IdentNode id) {
             module.emit("LOAD", id.getName());
-        } else if (e instanceof BinaryOpNode) {
-            BinaryOpNode b = (BinaryOpNode) e;
+        } else if (e instanceof BinaryOpNode b) {
             // short-circuit for && and ||
             String op = b.getOp();
             if ("&&".equals(op)) {
@@ -212,8 +206,7 @@ public class KimplePolizGenerator {
                 case ">=": module.emit(">="); break;
                 default: module.emit(op); break;
             }
-        } else if (e instanceof UnaryOpNode) {
-            UnaryOpNode u = (UnaryOpNode) e;
+        } else if (e instanceof UnaryOpNode u) {
             genExpression(u.getExpr());
             String op = u.getOp();
             if ("!".equals(op)) module.emit("NOT");
@@ -221,9 +214,7 @@ public class KimplePolizGenerator {
             else module.emit("UNARY_" + op);
         } else if (e instanceof FuncCallExprNode) {
             genFuncCall((FuncCallExprNode) e);
-        } else if (e instanceof CastNode) {
-            // cast only after Ident: in AST CastNode has Ident target
-            CastNode c = (CastNode) e;
+        } else if (e instanceof CastNode c) {
             module.emit("LOAD", c.getTarget().getName());
             module.emit("CAST", c.getToType());
         } else {
@@ -232,9 +223,7 @@ public class KimplePolizGenerator {
     }
 
     private void genFuncCall(FuncCallExprNode c) {
-        // push args left-to-right
         for (ExpressionNode a : c.getArgs()) genExpression(a);
-        // CALL operand is function label name
         module.emit("CALL", c.getName());
     }
 }
