@@ -10,7 +10,7 @@ public class LiteralNode extends ExpressionNode {
     }
 
     public String getValue() { return value; }
-    public String getLiteralType() { return type; }
+    public String getType() { return type; }
 
     @Override
     public <T> T accept(kimple.visitor.ASTVisitor<T> visitor) {
