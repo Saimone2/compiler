@@ -308,6 +308,14 @@ public class KimplePolizGenerator {
         genExpression(b.getLeft());
         genExpression(b.getRight());
 
+        String op = b.getOp();
+        if ("^".equals(op)) {
+            currentModule.emit("i2f conv");
+            currentModule.emit("SWAP stack_op");
+            currentModule.emit("i2f conv");
+            currentModule.emit("SWAP stack_op");
+        }
+
         switch (b.getOp()) {
             case "+" -> currentModule.emit("+ math_op");
             case "-" -> currentModule.emit("- math_op");

@@ -53,9 +53,8 @@ public class Kimple {
     public static void main(String[] args) {
         String code = """
                 val x: Int = 5
-                var y: Double = 0.012
-                print(x + y)
-
+                var MAX: Int = 6
+                
                 fun factorial(n: Int): Int {
                     var result: Int = 1
                     for (i: Int in 1..n) {
@@ -65,38 +64,15 @@ public class Kimple {
                 }
 
                 var rez✉️: Int = factorial(x)
-                print(rez✉️)
+                print("rez: ", rez✉️)
+                       
+                var test: Double = 2 ^ 3 + 4.0 * 5
+                print("Test: ", test)
+                
+                
+                //var isTrue: Boolean = (test == inf) && true
+                //print("Тест: ", isTrue as String)
                 """;
-
-        String code1 = """
-
-                    val MAX: Double = 5
-                    val MESSAGE: String = "Factorial: "
-                   \s
-                    fun factorial(n: Int): Int {
-                        var result: Int = 0
-                        for (i: Int in 1..n) {
-                            result = result * i
-                        }
-                        return result
-                    }
-                   \s
-                    var input: Int
-                    print("Input number: ")
-                    input = 5
-                   \s
-                    var fact: Int = factorial(input)
-                    if (fact >= MAX * 10) {
-                        print(MESSAGE, fact as String, " large!")
-                    } else {
-                        print(MESSAGE, fact as String, " small.")
-                    }
-                   \s
-                    var test: Double = 2 ^ 3 + 4.0 / 0
-                    var isTrue: Boolean = (test == inf) && true
-                    print("Тест: ", isTrue as String)
-
-               \s""";
 
         List<Token> tokens;
 
@@ -124,6 +100,7 @@ public class Kimple {
             System.out.println("====================================\n");
         } catch (SemanticException | SyntaxException e) {
             System.err.println("Syntax or semantic error: " + e.getMessage());
+            return;
         }
 
 
