@@ -66,12 +66,11 @@ public class Kimple {
                 var rez✉️: Int = factorial(x)
                 print("rez: ", rez✉️)
                        
-                var test: Double = 2 ^ 3 + 4.0 * 5
+                var test: Double = 2 ^ 3 + 4.0 * 5.6
                 print("Test: ", test)
                 
-                
-                //var isTrue: Boolean = (test == inf) && true
-                //print("Тест: ", isTrue as String)
+                var isTrue: Boolean = (test == inf) && true
+                print(isTrue)
                 """;
 
         List<Token> tokens;
