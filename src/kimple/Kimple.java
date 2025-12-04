@@ -66,7 +66,7 @@ public class Kimple {
                 var rez✉️: Int = factorial(x)
                 print("rez: ", rez✉️)
                        
-                var test: Double = 2 ^ 3 + 4.0 * 5.6
+                var test: Double = 2 ^ 3 ^ 4 + 4.0 * 5.6
                 print("Test: ", test)
                 
                 var isTrue: Boolean = (test == inf) && true

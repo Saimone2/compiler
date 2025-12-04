@@ -4,11 +4,14 @@ import kimple.ast.*;
 import java.util.*;
 
 public class KimplePolizGenerator {
-
+    private final Map<String, String> symbolTable = new HashMap<>();
     private final Map<String, PolizModule> modules = new LinkedHashMap<>();
     private PolizModule currentModule;
     private final Deque<String> funcStack = new ArrayDeque<>();
     private int labelCounter = 0;
+
+    // таблиця типів повернення функцій
+    private final Map<String, String> functionReturnTypes = new HashMap<>();
 
     /* ====================================================================== */
     /*                          PUBLIC ENTRY POINT                            */
@@ -52,6 +55,14 @@ public class KimplePolizGenerator {
         return "L" + (labelCounter++);
     }
 
+    private String getFunctionReturnType(String fullName) {
+        String type = functionReturnTypes.get(fullName);
+        if (type == null) {
+            throw new RuntimeException("Function not found: " + fullName);
+        }
+        return type;
+    }
+
     private String funcFullName(String name) {
         if (funcStack.isEmpty()) return name;
         return String.join("$", funcStack) + "$" + name;
@@ -69,28 +80,23 @@ public class KimplePolizGenerator {
 
         funcStack.push(fn.getName());
 
-        // Додаємо запис у root-модуль .funcs
-        saved.addFunc(fullName, mapType(fn.getReturnType()), fn.getParamNames().size());
+        saved.addFunc(fn.getName(), mapType(fn.getReturnType()), fn.getParamNames().size());
 
-        // Додаємо параметри у секцію vars функціонального модуля
+        functionReturnTypes.put(fullName, mapType(fn.getReturnType()));
+
         for (int i = 0; i < fn.getParamNames().size(); i++) {
-            currentModule.addVar(fn.getParamNames().get(i),
-                    mapType(fn.getParamTypes().get(i)));
-        }
+            String paramName = fn.getParamNames().get(i);
+            String paramType = mapType(fn.getParamTypes().get(i));
+            currentModule.addVar(paramName, paramType);
 
-        // Початок функції
+            symbolTable.put(paramName, paramType);
+        }
         currentModule.emit(fullName + " label");
 
-        // Генеруємо тіло
         genBlock(fn.getBody());
-
-        // Завершення функції
         currentModule.emit("RET");
-
-        // Зберігаємо модуль функції
         modules.put(fullName, currentModule);
 
-        // Генеруємо вкладені функції
         for (FuncDeclNode nested : fn.getNested()) {
             genFunction(nested);
         }
@@ -105,6 +111,7 @@ public class KimplePolizGenerator {
 
     private void genVarDecl(VarDeclNode v, boolean global) {
         String type = mapType(v.getType());
+        symbolTable.put(v.getName(), type);
         currentModule.addVar(v.getName(), type);
 
         if (v.getInit() != null) {
@@ -224,23 +231,25 @@ public class KimplePolizGenerator {
     }
 
     private void genFor(ForNode f) {
-        currentModule.addVar(f.getVarName(), "int");
+        String varName = f.getVarName();
+        currentModule.addVar(varName, "int");
+        symbolTable.put(varName, "int"); // ВАЖЛИВО: додати у symbolTable
 
         // i = start
-        currentModule.emit(f.getVarName() + " l-val");
+        currentModule.emit(varName + " l-val");
         genExpression(f.getStartExpr());
         currentModule.emit("= assign_op");
 
         String Lloop = newLabel();
         String Lend = newLabel();
 
-// LOOP:
+        // LOOP:
         currentModule.addLabel(Lloop, currentModule.currentAddress());
         currentModule.emit(Lloop + " label");
         currentModule.emit(": colon");
 
-// i <= end ?
-        currentModule.emit(f.getVarName() + " r-val");
+        // i <= end ?
+        currentModule.emit(varName + " r-val");
         genExpression(f.getEndExpr());
         currentModule.emit("<= rel_op");
 
@@ -248,21 +257,21 @@ public class KimplePolizGenerator {
         currentModule.emit(Lend + " label");
         currentModule.emit("JF jf");
 
-// body
+        // body
         genBlock(f.getBody());
 
-// i = i + 1
-        currentModule.emit(f.getVarName() + " l-val");
-        currentModule.emit(f.getVarName() + " r-val");
+        // i = i + 1
+        currentModule.emit(varName + " l-val");
+        currentModule.emit(varName + " r-val");
         currentModule.emit("1 int");
         currentModule.emit("+ math_op");
         currentModule.emit("= assign_op");
 
-// JMP → LOOP
+        // JMP → LOOP
         currentModule.emit(Lloop + " label");
         currentModule.emit("JMP jump");
 
-// END:
+        // END:
         currentModule.addLabel(Lend, currentModule.currentAddress());
         currentModule.emit(Lend + " label");
         currentModule.emit(": colon");
@@ -273,47 +282,85 @@ public class KimplePolizGenerator {
     /*                               EXPRESSIONS                               */
     /* ====================================================================== */
 
-    private void genExpression(ExpressionNode e) {
-        if (e instanceof LiteralNode l) genLiteral(l);
+    private String genExpression(ExpressionNode e) {
+        if (e instanceof LiteralNode l) {
+            return genLiteral(l);
+        }
         else if (e instanceof IdentNode id) {
             currentModule.emit(id.getName() + " r-val");
+            return getVariableType(id.getName());
         }
-        else if (e instanceof BinaryOpNode b) genBinary(b);
-        else if (e instanceof UnaryOpNode u) genUnary(u);
-        else if (e instanceof FuncCallExprNode fc) genFuncCall(fc);
-        else if (e instanceof CastNode c) genCast(c);
-        else throw new RuntimeException("Unknown expression: " + e);
+        else if (e instanceof BinaryOpNode b) {
+            return genBinary(b);
+        }
+        else if (e instanceof UnaryOpNode u) {
+            return genUnary(u);
+        }
+        else if (e instanceof FuncCallExprNode fc) {
+            return genFuncCall(fc);
+        }
+        else if (e instanceof CastNode c) {
+            genCast(c);
+            return mapType(c.getToType());
+        }
+        else {
+            throw new RuntimeException("Unknown expression: " + e);
+        }
     }
 
-    private void genLiteral(LiteralNode l) {
+    private String getVariableType(String name) {
+        String type = symbolTable.get(name);
+        if (type == null) throw new RuntimeException("Unknown variable: " + name);
+        return type;
+    }
+
+    private String genLiteral(LiteralNode l) {
         if (l.getType().equals("String")) {
             String val = l.getValue();
-            if (!val.startsWith("\"")) val = "\"" + val;
-            if (!val.endsWith("\"")) val = val + "\"";
+            if (!val.startsWith("\"")) val = "\"" + val + "\"";
             currentModule.emit(val + " string");
-            return;
+            return "string";
+        } else if (l.getType().equals("Boolean")) {
+            String val = l.getValue().equalsIgnoreCase("true") ? "true" : "false";
+            currentModule.emit(val + " bool");
+            return "bool";
+        } else {
+            currentModule.emit(l.getValue() + " " + mapType(l.getType()));
+            return mapType(l.getType());
         }
-        currentModule.emit(l.getValue() + " " + mapType(l.getType()));
     }
 
-    private void genUnary(UnaryOpNode u) {
-        genExpression(u.getExpr());
-        if (u.getOp().equals("!"))
+    private String genUnary(UnaryOpNode u) {
+        String type = genExpression(u.getExpr());
+        if (u.getOp().equals("-")) {
+            if (type.equals("int")) {
+                currentModule.emit("NEG math_op");
+            } else {
+                currentModule.emit("NEG math_op");
+            }
+        } else if (u.getOp().equals("!")) {
             currentModule.emit("NOT bool_op");
-        else if (u.getOp().equals("-"))
-            currentModule.emit("NEG math_op");
+            return "bool";
+        }
+        return type;
     }
 
-    private void genBinary(BinaryOpNode b) {
-        genExpression(b.getLeft());
-        genExpression(b.getRight());
+    private String genBinary(BinaryOpNode b) {
+        String leftType = genExpression(b.getLeft());
+        String rightType = genExpression(b.getRight());
 
         String op = b.getOp();
         if ("^".equals(op)) {
-            currentModule.emit("i2f conv");
-            currentModule.emit("SWAP stack_op");
-            currentModule.emit("i2f conv");
-            currentModule.emit("SWAP stack_op");
+            if (rightType.equals("int")) {
+                currentModule.emit("i2f conv");
+            }
+            if (leftType.equals("int")) {
+                currentModule.emit("SWAP stack_op");
+                currentModule.emit("i2f conv");
+                currentModule.emit("SWAP stack_op");
+            }
+            currentModule.emit("^ pow_op");
+            return "float";
         }
 
         switch (b.getOp()) {
@@ -336,6 +383,8 @@ public class KimplePolizGenerator {
 
             default -> throw new RuntimeException("Unknown operator: " + b.getOp());
         }
+
+        return (leftType.equals("float") || rightType.equals("float")) ? "float" : "int";
     }
 
     private void genCast(CastNode c) {
@@ -348,13 +397,13 @@ public class KimplePolizGenerator {
         }
     }
 
-    private void genFuncCall(FuncCallExprNode c) {
+    private String genFuncCall(FuncCallExprNode c) {
         for (ExpressionNode arg : c.getArgs()) {
             genExpression(arg);
         }
-
         String full = funcFullName(c.getName());
         currentModule.emit(full + " CALL");
+        return getFunctionReturnType(full);
     }
 
     /* ====================================================================== */

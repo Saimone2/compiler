@@ -357,13 +357,13 @@ public class AstParser {
     }
 
     private ExpressionNode parsePower() {
-        ExpressionNode left = parseUnary();
+        ExpressionNode base = parseUnary();
         if (current().type() == TokenType.POW_OP) {
             Token op = current(); advance();
-            ExpressionNode right = parsePower();
-            left = new BinaryOpNode("^", left, right, op.line());
+            ExpressionNode exponent = parsePower();
+            return new BinaryOpNode("^", base, exponent, op.line());
         }
-        return left;
+        return base;
     }
 
     private ExpressionNode parseUnary() {
