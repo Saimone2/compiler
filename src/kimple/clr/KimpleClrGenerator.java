@@ -77,17 +77,6 @@ public class KimpleClrGenerator {
         System.out.println("\nCLR код записаний у: " + outputPath);
     }
 
-    private void processDeclarations(List<? extends ASTNode> nodes) {
-        for (ASTNode node : nodes) {
-            if (node instanceof VarDeclNode v) {
-                String clrType = mapType(v.getType());
-                if (paramTable.containsKey(v.getName())) continue;
-                symbolTable.put(v.getName(), clrType);
-                localIndices.put(v.getName(), localIndexCounter++);
-            }
-        }
-    }
-
     private void genFuncCall(FuncCallExprNode c) {
         List<String> paramTypes = new ArrayList<>();
         for (ExpressionNode arg : c.getArgs()) {
@@ -174,24 +163,14 @@ public class KimpleClrGenerator {
 
     private void genVarDecl(VarDeclNode v) {
         if (v.getInit() != null) {
-            genAssignment(new AssignmentNode(v.getName(), v.getInit(), v.getLine()));
+            genExpression(v.getInit());
+            emitStoreLocal(v.getName());
         }
     }
 
     private void genAssignment(AssignmentNode a) {
         genExpression(a.getExpr());
-        String name = a.getName();
-        if (paramIndices.containsKey(name)) {
-            int idx = paramIndices.get(name);
-            if (idx >= 0 && idx <= 3) code.append("    starg " + idx + "\n");
-            else code.append("    starg.s " + idx + "\n");
-        } else if (localIndices.containsKey(name)) {
-            int idx = localIndices.get(name);
-            if (idx >= 0 && idx <= 3) code.append("    stloc." + idx + "\n");
-            else code.append("    stloc " + idx + "\n");
-        } else {
-            throw new RuntimeException("Unknown assignment target: " + name);
-        }
+        emitStoreLocal(a.getName());
     }
 
     private void genInput(InputNode in) {
@@ -223,8 +202,16 @@ public class KimpleClrGenerator {
         return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
-    private String genExpressionType(ExpressionNode e) {
-        return mapType(genExpression(e));
+    private void emitLoadLocal(String name) {
+        Integer idx = localIndices.get(name);
+        if (idx == null) throw new RuntimeException("Unknown local: " + name);
+        code.append(idx <= 3 ? "    ldloc." + idx + "\n" : "    ldloc " + idx + "\n");
+    }
+
+    private void emitStoreLocal(String name) {
+        Integer idx = localIndices.get(name);
+        if (idx == null) throw new RuntimeException("Unknown local: " + name);
+        code.append(idx <= 3 ? "    stloc." + idx + "\n" : "    stloc " + idx + "\n");
     }
 
     private void genReturn(ReturnNode r) {
@@ -271,26 +258,30 @@ public class KimpleClrGenerator {
     }
 
     private void genFor(ForNode f) {
-        String varName = f.getVarName();
-        localIndices.put(varName, localIndexCounter++);
+        String var = f.getVarName();
+        if (!localIndices.containsKey(var)) {
+            throw new RuntimeException("Loop variable not declared: " + var);
+        }
         genExpression(f.getStartExpr());
-        code.append("    stloc " + localIndices.get(varName) + "\n");
+        emitStoreLocal(var);
 
-        String loopLabel = newLabel();
-        String endLabel = newLabel();
+        String loop = newLabel();
+        String end  = newLabel();
 
-        code.append(loopLabel + ":\n");
-        code.append("    ldloc " + localIndices.get(varName) + "\n");
+        code.append(loop + ":\n");
+        emitLoadLocal(var);
         genExpression(f.getEndExpr());
         code.append("    cgt\n");
-        code.append("    brtrue " + endLabel + "\n");
+        code.append("    brtrue " + end + "\n");
+
         genBlock(f.getBody());
-        code.append("    ldloc " + localIndices.get(varName) + "\n");
+        emitLoadLocal(var);
         code.append("    ldc.i4 1\n");
         code.append("    add\n");
-        code.append("    stloc " + localIndices.get(varName) + "\n");
-        code.append("    br " + loopLabel + "\n");
-        code.append(endLabel + ":\n");
+        emitStoreLocal(var);
+
+        code.append("    br " + loop + "\n");
+        code.append(end + ":\n");
     }
 
     private String genExpression(ExpressionNode e) {
@@ -333,12 +324,9 @@ public class KimpleClrGenerator {
                 int idx = paramIndices.get(name);
                 code.append(idx <= 3 ? "    ldarg." + idx + "\n" : "    ldarg " + idx + "\n");
                 return paramTable.get(name);
-            } else if (localIndices.containsKey(name)) {
-                int idx = localIndices.get(name);
-                code.append(idx <= 3 ? "    ldloc." + idx + "\n" : "    ldloc " + idx + "\n");
-                return symbolTable.get(name);
             } else {
-                throw new RuntimeException("Unknown identifier: " + name);
+                emitLoadLocal(name);
+                return symbolTable.get(name);
             }
         } else if (e instanceof BinaryOpNode b) {
             String lt = genExpression(b.getLeft());
@@ -396,10 +384,9 @@ public class KimpleClrGenerator {
         } else if (e instanceof CastNode c) {
             genExpression(c.getTarget());
             switch (c.getToType()) {
-                case "Int" -> code.append("    conv.i4\n");
+                case "Int", "Boolean" -> code.append("    conv.i4\n");
                 case "Double" -> code.append("    conv.r8\n");
                 case "String" -> code.append("    call string [mscorlib]System.Convert::ToString(object)\n");
-                case "Boolean" -> code.append("    conv.i4\n");
             }
             return mapType(c.getToType());
         }

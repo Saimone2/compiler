@@ -84,25 +84,6 @@ public class Kimple {
         String code = """
                 val x: Int = 5
                 var MAX: Int = 6
-  
-                var test: Double = 2 ^ 3 ^ 4 + 4.0 * 5.6
-                print("Test: ", test)
-                
-                var test2: Double = 5.6 + 4
-                print("Test2: ", test2)
-                
-                // if умова
-                if (test2 < 10.0) {
-                    print("test2 is less than 10")
-                }
-                
-                var isTrue: Boolean = (test == inf) && true
-                print(isTrue)
-                """;
-
-        String code1 = """
-                val x: Int = 5
-                var MAX: Int = 6
                 
                 fun factorial(n: Int): Int {
                     var result: Int = 1
@@ -133,7 +114,7 @@ public class Kimple {
         List<Token> tokens;
 
         System.out.println("==== Лексичний аналіз ====");
-        KimpleLexer lexer = new KimpleLexer(code1);
+        KimpleLexer lexer = new KimpleLexer(code);
         try {
             tokens = lexer.tokenize();
             for (Token token : tokens) {
