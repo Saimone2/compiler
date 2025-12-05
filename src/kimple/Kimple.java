@@ -20,7 +20,7 @@ import java.util.Map;
 
 public class Kimple {
 
-    private static void runPSMFromJava(String module) {
+    private static void runPSMFromJava() {
         try {
             List<String> cmd = new ArrayList<>();
             cmd.add("python");
@@ -28,7 +28,7 @@ public class Kimple {
             cmd.add("-p");
             cmd.add(new File("out/production/lab2/kimple").getAbsolutePath());
             cmd.add("-m");
-            cmd.add(module);
+            cmd.add("program");
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
 
@@ -62,12 +62,20 @@ public class Kimple {
                     }
                     return result
                 }
-
+                
                 var rez✉️: Int = factorial(x)
                 print("rez: ", rez✉️)
-                       
+                
                 var test: Double = 2 ^ 3 ^ 4 + 4.0 * 5.6
                 print("Test: ", test)
+                
+                var test2: Double = 5.6 + 4
+                print("Test2: ", test2)
+                
+                // if умова
+                if (test2 < 10.0) {
+                    print("test2 is less than 10")
+                }
                 
                 var isTrue: Boolean = (test == inf) && true
                 print(isTrue)
@@ -120,7 +128,7 @@ public class Kimple {
         System.out.println("\nВиконання POLIZ...");
         System.out.println("======================================\n");
 
-        runPSMFromJava("program");
+        runPSMFromJava();
 
         System.out.println("\n======================================");
         System.out.println("Виконання завершено.");

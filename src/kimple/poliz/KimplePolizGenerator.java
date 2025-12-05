@@ -39,7 +39,7 @@ public class KimplePolizGenerator {
         }
 
         for (ASTNode o : others) {
-            if (o instanceof VarDeclNode v) genVarDecl(v, true);
+            if (o instanceof VarDeclNode v) genVarDecl(v);
             else if (o instanceof StatementNode s) genStatement(s);
         }
 
@@ -109,7 +109,7 @@ public class KimplePolizGenerator {
     /*                         DECLARATIONS (VAR / CONST)                      */
     /* ====================================================================== */
 
-    private void genVarDecl(VarDeclNode v, boolean global) {
+    private void genVarDecl(VarDeclNode v) {
         String type = mapType(v.getType());
         symbolTable.put(v.getName(), type);
         currentModule.addVar(v.getName(), type);
@@ -126,7 +126,7 @@ public class KimplePolizGenerator {
     /* ====================================================================== */
 
     private void genStatement(StatementNode s) {
-        if (s instanceof VarDeclNode v) genVarDecl(v, false);
+        if (s instanceof VarDeclNode v) genVarDecl(v);
         else if (s instanceof AssignmentNode a) genAssignment(a);
         else if (s instanceof InputNode i) genInput(i);
         else if (s instanceof OutputNode o) genOutput(o);
@@ -183,29 +183,36 @@ public class KimplePolizGenerator {
     private void genIf(IfNode n) {
         genExpression(n.getCond());
 
-        String Lelse = newLabel();  // наприклад L2
-        String Lend  = newLabel();  // наприклад L3
-
-        // 1. Спочатку оголошуємо мітки, які будемо використовувати
-        currentModule.emit(Lelse + " label");
-        currentModule.emit("JF jf");           // false → на else
-
-        currentModule.emit(Lend + " label");
-        currentModule.emit("JMP jump");        // пропустити else
-
-        // 2. Тепер ставимо : colon для міток
-        currentModule.emit(Lelse + " label");
-        currentModule.emit(": colon");
-
         if (n.getElseBlock() != null) {
+            String elseLabel = newLabel();
+            String endLabel  = newLabel();
+
+            currentModule.emit(elseLabel + " label");
+            currentModule.emit("JF jf");
+
+            genBlock(n.getThenBlock());
+
+            currentModule.emit(endLabel + " label");
+            currentModule.emit("JMP jump");
+
+            currentModule.emit(elseLabel + " label");
+            currentModule.emit(": colon");
             genBlock(n.getElseBlock());
+
+            currentModule.emit(endLabel + " label");
+            currentModule.emit(": colon");
+
+        } else {
+            String endLabel = newLabel();
+
+            currentModule.emit(endLabel + " label");
+            currentModule.emit("JF jf");
+
+            genBlock(n.getThenBlock());
+
+            currentModule.emit(endLabel + " label");
+            currentModule.emit(": colon");
         }
-
-        currentModule.emit(Lend + " label");
-        currentModule.emit(": colon");
-
-        // 3. then-гілка (виконується, якщо умова true)
-        genBlock(n.getThenBlock());
     }
 
     private void genWhile(WhileNode n) {
@@ -350,6 +357,17 @@ public class KimplePolizGenerator {
         String rightType = genExpression(b.getRight());
 
         String op = b.getOp();
+
+        if ((leftType.equals("float") && rightType.equals("int"))) {
+            currentModule.emit("i2f conv");
+            rightType = "float";
+        } else if ((leftType.equals("int") && rightType.equals("float"))) {
+            currentModule.emit("SWAP stack_op");
+            currentModule.emit("i2f conv");
+            currentModule.emit("SWAP stack_op");
+            leftType = "float";
+        }
+
         if ("^".equals(op)) {
             if (rightType.equals("int")) {
                 currentModule.emit("i2f conv");
