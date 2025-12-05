@@ -1,6 +1,7 @@
 package kimple;
 
 import kimple.ast.ProgramNode;
+import kimple.clr.KimpleClrGenerator;
 import kimple.lexer.*;
 import kimple.parser.AstParser;
 import kimple.parser.KimpleParser;
@@ -12,6 +13,7 @@ import kimple.poliz.PolizWriter;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -50,7 +52,34 @@ public class Kimple {
         }
     }
 
-    public static void main(String[] args) {
+    private static void compileWithIlasm() throws IOException, InterruptedException {
+        String ilasmPath = "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\ilasm.exe";
+        String ilFile = new File("out/production/lab2/kimple/program.il").getAbsolutePath();
+
+        ProcessBuilder pb = new ProcessBuilder(
+                ilasmPath,
+                ilFile,
+                "/exe",
+                "/output=program.exe",
+                "/quiet"
+        );
+
+        pb.directory(new File("out/production/lab2/kimple"));
+        pb.inheritIO();
+
+        int exitCode = pb.start().waitFor();
+        if (exitCode == 0) {
+            System.out.println("Успішно зібрано: program.exe");
+            new ProcessBuilder("cmd", "/c", "program.exe")
+                    .directory(new File("out/production/lab2/kimple"))
+                    .inheritIO()
+                    .start();
+        } else {
+            System.err.println("Помилка збірки (ilasm вернув " + exitCode + ")");
+        }
+    }
+
+    public static void main(String[] args) throws IOException, InterruptedException {
         String code = """
                 val x: Int = 5
                 var MAX: Int = 6
@@ -63,8 +92,8 @@ public class Kimple {
                     return result
                 }
                 
-                var rez✉️: Int = factorial(x)
-                print("rez: ", rez✉️)
+                var rez: Int = factorial(x)
+                print("rez: ", rez)
                 
                 var test: Double = 2 ^ 3 ^ 4 + 4.0 * 5.6
                 print("Test: ", test)
@@ -132,5 +161,10 @@ public class Kimple {
 
         System.out.println("\n======================================");
         System.out.println("Виконання завершено.");
+
+        KimpleClrGenerator clrGen = new KimpleClrGenerator(program);
+        clrGen.generate();
+
+        compileWithIlasm();
     }
 }
