@@ -19,6 +19,9 @@ public class KimpleClrGenerator {
     private final Map<String, Integer> localIndices = new HashMap<>();
     private final Map<String, String> functionReturnTypes = new HashMap<>();
     private final Deque<String> funcStack = new LinkedList<>();
+    private final Map<String, String> paramTable = new HashMap<>();
+    private final Map<String, Integer> paramIndices = new HashMap<>();
+    private boolean hasExplicitReturn = false;
 
     public KimpleClrGenerator(ProgramNode program) {
         this.program = program;
@@ -47,9 +50,11 @@ public class KimpleClrGenerator {
 
         symbolTable.clear();
         localIndices.clear();
+        paramTable.clear();
+        paramIndices.clear();
         localIndexCounter = 0;
 
-        processDeclarations(others);
+        collectLocalsFrom(others);
         generateLocals();
 
         for (ASTNode o : others) {
@@ -63,20 +68,20 @@ public class KimpleClrGenerator {
 
         code.append("    ret\n");
         code.append("  }\n");
-
         code.append("}\n");
 
         String outputPath = "out/production/lab2/kimple/program.il";
         try (FileWriter writer = new FileWriter(outputPath)) {
             writer.write(code.toString());
         }
-        System.out.println("CLR код записаний у: " + outputPath);
+        System.out.println("\nCLR код записаний у: " + outputPath);
     }
 
     private void processDeclarations(List<? extends ASTNode> nodes) {
         for (ASTNode node : nodes) {
             if (node instanceof VarDeclNode v) {
                 String clrType = mapType(v.getType());
+                if (paramTable.containsKey(v.getName())) continue;
                 symbolTable.put(v.getName(), clrType);
                 localIndices.put(v.getName(), localIndexCounter++);
             }
@@ -113,6 +118,7 @@ public class KimpleClrGenerator {
         functionReturnTypes.put(fullName, returnType);
 
         funcStack.push(fn.getName());
+
         code.append("  .method private hidebysig static " + returnType + " " + fullName + "(");
         List<String> params = new ArrayList<>();
         for (int i = 0; i < fn.getParamNames().size(); i++) {
@@ -123,21 +129,25 @@ public class KimpleClrGenerator {
 
         symbolTable.clear();
         localIndices.clear();
+        paramTable.clear();
+        paramIndices.clear();
+        localIndexCounter = 0;
 
         for (int i = 0; i < fn.getParamNames().size(); i++) {
             String name = fn.getParamNames().get(i);
             String type = mapType(fn.getParamTypes().get(i));
-            symbolTable.put(name, type);
-            localIndices.put(name, i);
+            paramTable.put(name, type);
+            paramIndices.put(name, i);
         }
-        localIndexCounter = fn.getParamNames().size();
-        processDeclarations(fn.getBody().getStatements());
+
+        collectLocalsFrom(fn.getBody().getStatements());
         generateLocals();
 
+        hasExplicitReturn = false;
         genBlock(fn.getBody());
-
-        code.append("    ret\n");
+        if (!hasExplicitReturn) code.append("    ret\n");
         code.append("  }\n");
+
         for (FuncDeclNode nested : fn.getNested()) genFunction(nested);
         funcStack.pop();
     }
@@ -170,8 +180,18 @@ public class KimpleClrGenerator {
 
     private void genAssignment(AssignmentNode a) {
         genExpression(a.getExpr());
-        symbolTable.get(a.getName());
-        code.append("    stloc " + localIndices.get(a.getName()) + "\n");
+        String name = a.getName();
+        if (paramIndices.containsKey(name)) {
+            int idx = paramIndices.get(name);
+            if (idx >= 0 && idx <= 3) code.append("    starg " + idx + "\n");
+            else code.append("    starg.s " + idx + "\n");
+        } else if (localIndices.containsKey(name)) {
+            int idx = localIndices.get(name);
+            if (idx >= 0 && idx <= 3) code.append("    stloc." + idx + "\n");
+            else code.append("    stloc " + idx + "\n");
+        } else {
+            throw new RuntimeException("Unknown assignment target: " + name);
+        }
     }
 
     private void genInput(InputNode in) {
@@ -210,6 +230,7 @@ public class KimpleClrGenerator {
     private void genReturn(ReturnNode r) {
         if (r.getExpr() != null) genExpression(r.getExpr());
         code.append("    ret\n");
+        hasExplicitReturn = true;
     }
 
     private void genBlock(BlockNode b) {
@@ -220,18 +241,21 @@ public class KimpleClrGenerator {
 
     private void genIf(IfNode n) {
         genExpression(n.getCond());
-
-        String elseLabel = newLabel();
-        String endLabel = newLabel();
-
-        code.append("    brfalse " + elseLabel + "\n");
-        genBlock(n.getThenBlock());
-        code.append("    br " + endLabel + "\n");
-        code.append(elseLabel + ":\n");
-        if (n.getElseBlock() != null) {
+        if (n.getElseBlock() == null) {
+            String endLabel = newLabel();
+            code.append("    brfalse " + endLabel + "\n");
+            genBlock(n.getThenBlock());
+            code.append(endLabel + ":\n");
+        } else {
+            String elseLabel = newLabel();
+            String endLabel  = newLabel();
+            code.append("    brfalse " + elseLabel + "\n");
+            genBlock(n.getThenBlock());
+            code.append("    br " + endLabel + "\n");
+            code.append(elseLabel + ":\n");
             genBlock(n.getElseBlock());
+            code.append(endLabel + ":\n");
         }
-        code.append(endLabel + ":\n");
     }
 
     private void genWhile(WhileNode n) {
@@ -248,7 +272,6 @@ public class KimpleClrGenerator {
 
     private void genFor(ForNode f) {
         String varName = f.getVarName();
-        symbolTable.put(varName, "int32");
         localIndices.put(varName, localIndexCounter++);
         genExpression(f.getStartExpr());
         code.append("    stloc " + localIndices.get(varName) + "\n");
@@ -305,8 +328,18 @@ public class KimpleClrGenerator {
                 }
             }
         } else if (e instanceof IdentNode id) {
-            code.append("    ldloc " + localIndices.get(id.getName()) + "\n");
-            return symbolTable.get(id.getName());
+            String name = id.getName();
+            if (paramIndices.containsKey(name)) {
+                int idx = paramIndices.get(name);
+                code.append(idx <= 3 ? "    ldarg." + idx + "\n" : "    ldarg " + idx + "\n");
+                return paramTable.get(name);
+            } else if (localIndices.containsKey(name)) {
+                int idx = localIndices.get(name);
+                code.append(idx <= 3 ? "    ldloc." + idx + "\n" : "    ldloc " + idx + "\n");
+                return symbolTable.get(name);
+            } else {
+                throw new RuntimeException("Unknown identifier: " + name);
+            }
         } else if (e instanceof BinaryOpNode b) {
             String lt = genExpression(b.getLeft());
             String rt = genExpression(b.getRight());
@@ -352,16 +385,13 @@ public class KimpleClrGenerator {
         } else if (e instanceof FuncCallExprNode fc) {
             List<String> paramTypes = new ArrayList<>();
             for (ExpressionNode arg : fc.getArgs()) {
-                String t = genExpression(arg);
+                String t = genExpression(arg); // emit loads
                 paramTypes.add(t);
             }
-
             String full = funcFullName(fc.getName());
             String retType = getFunctionReturnType(full);
-            code.append("    call " + retType + " Program::" + full + "(");
-            code.append(String.join(", ", paramTypes));
-            code.append(")\n");
 
+            code.append("    call " + retType + " Program::" + full + "(" + String.join(", ", paramTypes) + ")\n");
             return retType;
         } else if (e instanceof CastNode c) {
             genExpression(c.getTarget());
@@ -374,6 +404,37 @@ public class KimpleClrGenerator {
             return mapType(c.getToType());
         }
         throw new RuntimeException("Unsupported expression: " + e.getClass());
+    }
+
+    private void collectLocalsFrom(List<? extends ASTNode> nodes) {
+        for (ASTNode node : nodes) {
+            if (node instanceof VarDeclNode v) {
+                String name = v.getName();
+                if (!symbolTable.containsKey(name)) {
+                    String clrType = mapType(v.getType());
+                    symbolTable.put(name, clrType);
+                    localIndices.put(name, localIndexCounter++);
+                }
+            } else if (node instanceof ForNode f) {
+                // змінна циклу
+                String varName = f.getVarName();
+                if (!symbolTable.containsKey(varName)) {
+                    symbolTable.put(varName, "int32");
+                    localIndices.put(varName, localIndexCounter++);
+                }
+                // рекурсивно збираємо з тіла циклу
+                collectLocalsFrom(f.getBody().getStatements());
+            } else if (node instanceof WhileNode w) {
+                collectLocalsFrom(w.getBody().getStatements());
+            } else if (node instanceof IfNode i) {
+                collectLocalsFrom(i.getThenBlock().getStatements());
+                if (i.getElseBlock() != null) {
+                    collectLocalsFrom(i.getElseBlock().getStatements());
+                }
+            } else if (node instanceof BlockNode b) {
+                collectLocalsFrom(b.getStatements());
+            }
+        }
     }
 
     private String getFunctionReturnType(String fullName) {
