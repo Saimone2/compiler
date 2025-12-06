@@ -30,8 +30,8 @@ public class KimpleParser {
         String tokenInfo = curr.type() == TokenType.EOF
                 ? "EOF"
                 : String.format("('%s', '%s')", curr.value(), curr.type().name().toLowerCase());
-        System.out.printf("parseToken: В рядку %d токен %s %s%n",
-                curr.line(), tokenInfo, message);
+        //System.out.printf("parseToken: В рядку %d токен %s %s%n",
+        //        curr.line(), tokenInfo, message);
     }
 
     private Token expect(TokenType type) {

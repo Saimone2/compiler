@@ -1,56 +1,22 @@
-package kimple;
+package kimple.antlr;
 
-import kimple.ast.ProgramNode;
+import kimple.ast.*;
 import kimple.clr.KimpleClrGenerator;
-import kimple.lexer.*;
+import kimple.gen.KimpleLexer;
+import kimple.gen.KimpleParser;
+import kimple.lexer.LexicalException;
+import kimple.lexer.Token;
 import kimple.parser.AstParser;
-import kimple.parser.KimpleParser;
 import kimple.parser.SemanticException;
 import kimple.parser.SyntaxException;
-import kimple.poliz.KimplePolizGenerator;
-import kimple.poliz.PolizModule;
-import kimple.poliz.PolizWriter;
+import org.antlr.v4.runtime.*;
+import org.antlr.v4.runtime.tree.ParseTree;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
-public class Kimple {
-
-    public static void runPSMFromJava() {
-        try {
-            List<String> cmd = new ArrayList<>();
-            cmd.add("python");
-            cmd.add("PSM.py");
-            cmd.add("-p");
-            cmd.add(new File("out/production/lab2/kimple").getAbsolutePath());
-            cmd.add("-m");
-            cmd.add("program");
-
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-
-            pb.directory(new File("src/kimple/psm"));
-            pb.redirectErrorStream(true);
-
-            Process proc = pb.start();
-
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
-
-                String line;
-                while ((line = br.readLine()) != null) {
-                    System.out.println(line);
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
+public class KimpleRunner {
 
     private static void compileWithIlasm() throws IOException, InterruptedException {
         String ilasmPath = "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\ilasm.exe";
@@ -111,60 +77,65 @@ public class Kimple {
                 print(isTrue)
                 """;
 
-        List<Token> tokens;
-
-        System.out.println("==== Лексичний аналіз ====");
-        KimpleLexer lexer = new KimpleLexer(code);
-        try {
-            tokens = lexer.tokenize();
-            for (Token token : tokens) {
-                System.out.println(token);
-            }
-            System.out.println("=================================");
-            System.out.println("Лексичний аналіз пройшов успішно!");
-            System.out.println("=================================\n");
-        } catch (LexicalException e) {
-            System.err.println("Lexical error: " + e.getMessage());
-            return;
-        }
-
-        System.out.println("==== Синтаксичний та семантичний аналіз ====");
-        try {
-            KimpleParser parser = new KimpleParser(tokens);
-            parser.parse();
-            System.out.println("====================================");
-            System.out.println("Синтаксичний та семантичний аналіз пройшов успішно!");
-            System.out.println("====================================\n");
-        } catch (SemanticException | SyntaxException e) {
-            System.err.println("Syntax or semantic error: " + e.getMessage());
-            return;
-        }
+        CharStream input = CharStreams.fromString(code);
+        KimpleLexer lexer = new KimpleLexer(input);
+        CommonTokenStream tokens = new CommonTokenStream(lexer);
+        KimpleParser parser = new KimpleParser(tokens);
 
 
-        AstParser astp = new AstParser(tokens);
+        ParseTree tree = parser.program();
+
+        AstBuilder visitor = new AstBuilder();
         ProgramNode program;
         try {
-            program = astp.parse();
+            program = (ProgramNode) visitor.visit(tree);
         } catch (RuntimeException e) {
             System.err.println("Parse error: " + e.getMessage());
             return;
         }
-
-        KimplePolizGenerator gen = new KimplePolizGenerator();
-        Map<String, PolizModule> modules = gen.generateAll(program);
-
-        PolizWriter.writeFiles(modules);
-
-        System.out.println("\nВиконання POLIZ...");
-        System.out.println("======================================\n");
-
-        runPSMFromJava();
-
-        System.out.println("\n======================================");
-        System.out.println("Виконання завершено.");
+        program = parser(code);
 
         KimpleClrGenerator clrGen = new KimpleClrGenerator(program);
         clrGen.generate();
+
         compileWithIlasm();
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private static ProgramNode parser(String code) {
+        List<Token> tokens = List.of();
+        kimple.lexer.KimpleLexer lexer = new kimple.lexer.KimpleLexer(code);
+        try {
+            tokens = lexer.tokenize();
+        } catch (LexicalException e) {
+            System.err.println("Lexical error: " + e.getMessage());
+        }
+
+        try {
+            kimple.parser.KimpleParser parser = new kimple.parser.KimpleParser(tokens);
+            parser.parse();
+        } catch (SemanticException | SyntaxException e) {
+            System.err.println("Syntax or semantic error: " + e.getMessage());
+        }
+
+        AstParser astp = new AstParser(tokens);
+        ProgramNode program = null;
+        try {
+            program = astp.parse();
+        } catch (RuntimeException e) {
+            System.err.println("Parse error: " + e.getMessage());
+        }
+        return program;
     }
 }

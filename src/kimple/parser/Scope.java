@@ -18,7 +18,7 @@ public class Scope {
             throw new SemanticException("Semantic error: '" + symbol.name() + "' already declared in scope '" + scopeName + "' (line " + symbol.declaredLine() + ")");
         }
         symbols.put(symbol.name(), symbol);
-        System.out.println("Declared: " + symbol.name() + " : " + symbol.type() + " in scope '" + scopeName + "'");
+        //System.out.println("Declared: " + symbol.name() + " : " + symbol.type() + " in scope '" + scopeName + "'");
     }
 
     public Symbol lookup(String name, int line) {
